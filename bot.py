@@ -3,8 +3,8 @@ from telegram import Update
 import os
 from datetime import datetime
 
-ADMIN_ID = 1710485408
-TOKEN = "7971843772:AAFX_pKL9OAWBnGqsgEiDOPB3ITSgZlAiic"
+TOKEN = os.getenv("TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -58,7 +58,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("feedback", feedback))
     app.add_handler(CommandHandler("view_feedback", view_feedback))
-
 
     print("Бот запущен")
     app.run_polling()
