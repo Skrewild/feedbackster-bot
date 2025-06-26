@@ -25,8 +25,10 @@ HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
 LOG_FILE = "feedback_log.csv"
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -36,11 +38,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=ForceReply(selective=True),
     )
 
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\n"
         "Администратор может использовать /summary для анализа отзывов."
     )
+
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -61,6 +65,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
     await update.message.reply_text("✅ Спасибо за ваш отзыв!")
+
 
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
@@ -90,9 +95,20 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             headers=HEADERS,
             json={"inputs": prompt}
         )
+
+        if response.status_code != 200:
+            logging.error(f"HF API status {response.status_code}: {response.text}")
+            await update.message.reply_text("❌ Ошибка от Hugging Face API: модель не отвечает.")
+            return
+
+        if not response.text.strip():
+            logging.error("Empty response from HF API.")
+            await update.message.reply_text("⚠️ Пустой ответ от Hugging Face API.")
+            return
+
         result = response.json()
 
-        if isinstance(result, list) and 'generated_text' in result[0]:
+        if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
             summary_text = result[0]['generated_text'].strip()
         elif 'error' in result:
             summary_text = f"Ошибка Hugging Face API: {result['error']}"
@@ -105,6 +121,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Hugging Face API error: {e}")
         await update.message.reply_text("❌ Ошибка при обращении к Hugging Face API.")
 
+
 def main() -> None:
     app = Application.builder().token(TOKEN).build()
 
@@ -114,6 +131,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
 
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
