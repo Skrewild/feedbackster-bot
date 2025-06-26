@@ -36,16 +36,14 @@ logging.basicConfig(
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     await update.message.reply_html(
-        rf"Привет, {user.mention_html()}! 👋\n"
-        "Отправьте ваше мнение или отзыв, и я сохраню его.",
+        rf"Привет, {user.mention_html()}! 👋\nОтправьте ваше мнение или отзыв, и я сохраню его.",
         reply_markup=ForceReply(selective=True),
     )
 
 # Help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\n"
-        "Администратор может использовать /summary для анализа отзывов."
+        "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\nАдминистратор может использовать /summary для анализа отзывов."
     )
 
 # Feedback handler
@@ -87,7 +85,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {
                     "role": "system",
