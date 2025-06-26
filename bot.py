@@ -2,8 +2,10 @@ import os
 import logging
 import csv
 from datetime import datetime
-
 from dotenv import load_dotenv
+
+import requests
+from huggingface_hub import InferenceClient
 from telegram import Update, ForceReply
 from telegram.ext import (
     Application,
@@ -12,28 +14,28 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from huggingface_hub import InferenceClient
 
 # Load environment variables
 load_dotenv()
+
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-# Hugging Face setup
-client = InferenceClient(
-    model="meta-llama/Llama-3.1-8B-Instruct",
-    token=HF_TOKEN,
-)
-
-# Logging setup
 LOG_FILE = "feedback_log.csv"
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# Start command
+# Hugging Face chat-compatible model (recommended)
+client = InferenceClient(
+    model="HuggingFaceH4/zephyr-7b-beta",
+    token=HF_TOKEN,
+)
+
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     await update.message.reply_html(
@@ -42,14 +44,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=ForceReply(selective=True),
     )
 
-# Help command
+# /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\n"
         "Администратор может использовать /summary для анализа отзывов."
     )
 
-# Feedback handler
+# handle user messages
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     feedback = update.message.text
@@ -68,7 +70,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await update.message.reply_text("✅ Спасибо за ваш отзыв!")
 
-# Summary command
+# /summary (admin only)
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("🚫 Эта команда доступна только администратору.")
@@ -84,29 +86,29 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пока нет отзывов для анализа.")
             return
         feedbacks = [line.strip().split(",")[3] for line in lines if len(line.strip().split(",")) >= 4]
-        combined_feedback = "\n".join(feedbacks[:50])  # Limit to 50 for brevity
+        combined_feedback = "\n".join(feedbacks[:50])  # limit for token safety
 
     prompt = (
-        "Summarize the following customer feedback into key themes, complaints, suggestions, "
-        "and overall sentiment:\n\n" + combined_feedback
+        "You are an AI assistant analyzing user feedback. Please provide a concise summary of the following "
+        "comments, highlighting main themes, recurring suggestions, complaints, and overall sentiment.\n\n"
+        + combined_feedback
     )
 
     try:
-        response = client.chat_completion(
+        response = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are a helpful assistant summarizing feedback."},
+                {"role": "system", "content": "You summarize customer feedback in clear bullet points."},
                 {"role": "user", "content": prompt}
             ]
         )
-
-        summary_text = response.choices[0].message["content"].strip()
+        summary_text = response.choices[0].message.content.strip()
         await update.message.reply_text(f"📝 Резюме:\n{summary_text}")
 
     except Exception as e:
         logging.error(f"Hugging Face API error: {e}")
         await update.message.reply_text("❌ Ошибка при обращении к Hugging Face API.")
 
-# Main function
+# Main bot logic
 def main() -> None:
     app = Application.builder().token(TOKEN).build()
 
@@ -116,6 +118,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
 
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
