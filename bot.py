@@ -1,87 +1,114 @@
-import logging
-from telegram import Update, ForceReply
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-from datetime import datetime
 import os
+import logging
 import csv
-from textblob import TextBlob  
+from datetime import datetime
 
-TOKEN = os.getenv("TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+from dotenv import load_dotenv
+from telegram import Update, ForceReply
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
 )
+import openai
+
+load_dotenv()
+
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 
 LOG_FILE = "feedback_log.csv"
 
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
-if not os.path.exists(LOG_FILE):
-    with open(LOG_FILE, mode='w', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow(["User ID", "Username", "Timestamp", "Feedback", "Sentiment", "Polarity"])
-
-
-def analyze_sentiment(text):
-    blob = TextBlob(text)
-    polarity = blob.sentiment.polarity
-    if polarity > 0.1:
-        label = "Положительное"
-    elif polarity < -0.1:
-        label = "Отрицательное"
-    else:
-        label = "Нейтральное"
-    return label, round(polarity, 2)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Отправьте мне ваше сообщение, и я передам его администратору.")
-
-
-async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
-    feedback = update.message.text
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    sentiment_label, polarity = analyze_sentiment(feedback)
-
-    
-    with open(LOG_FILE, mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        writer.writerow([user.id, user.username or "None", timestamp, feedback, sentiment_label, polarity])
-
-    
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            f"Новое сообщение от @{user.username or user.id}:\n"
-            f"✉️ {feedback}\n"
-            f"📊 Настроение: {sentiment_label} ({polarity:+})"
-        )
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    await update.message.reply_html(
+        rf"Привет, {user.mention_html()}! 👋\n"
+        "Отправьте ваше мнение или отзыв, и я сохраню его.",
+        reply_markup=ForceReply(selective=True),
     )
 
-    
-    await update.message.reply_text("Спасибо за ваше сообщение!")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\n"
+        "Администратор может использовать /summary для анализа отзывов."
+    )
 
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    feedback = update.message.text
 
-async def get_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    is_new_file = not os.path.exists(LOG_FILE)
+    with open(LOG_FILE, mode="a", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        if is_new_file:
+            writer.writerow(["date", "user_id", "username", "feedback"])
+        writer.writerow(
+            [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                user.id,
+                user.username or "unknown",
+                feedback.replace("\n", " "),
+            ]
+        )
+
+    await update.message.reply_text("✅ Спасибо за ваш отзыв!")
+
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("Извините, эта команда доступна только администратору.")
+        await update.message.reply_text("🚫 Эта команда доступна только администратору.")
         return
 
-    if os.path.exists(LOG_FILE):
-        await context.bot.send_document(chat_id=update.message.chat_id, document=open(LOG_FILE, "rb"))
-    else:
-        await update.message.reply_text("Файл с логами не найден.")
+    if not os.path.exists(LOG_FILE):
+        await update.message.reply_text("Файл с отзывами не найден.")
+        return
 
+    with open(LOG_FILE, encoding="utf-8") as f:
+        lines = f.readlines()[1:]  
+        if not lines:
+            await update.message.reply_text("Пока нет отзывов для анализа.")
+            return
+        feedbacks = [line.strip().split(",")[3] for line in lines if len(line.strip().split(",")) >= 4]
+        combined_feedback = "\n".join(feedbacks[:50])  
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(TOKEN).build()
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an assistant that summarizes customer feedback for business improvement."
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize the following feedback into key themes, complaints, suggestions, and overall sentiment:\n\n{combined_feedback}"
+                }
+            ],
+            max_tokens=500,
+        )
+        summary_text = response.choices[0].message.content.strip()
+        await update.message.reply_text(f"📝 Резюме:\n{summary_text}")
+    except Exception as e:
+        logging.error(f"OpenAI error: {e}")
+        await update.message.reply_text("❌ Ошибка при обращении к OpenAI API.")
 
+def main() -> None:
+    app = Application.builder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("getlog", get_log))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("summary", summary))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
-
+ 
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
