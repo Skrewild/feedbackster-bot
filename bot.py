@@ -95,13 +95,12 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        response = client.chat.completions.create(
+        summary_text = client.chat(
             messages=[
-                {"role": "system", "content": "You summarize customer feedback in clear bullet points."},
-                {"role": "user", "content": prompt}
+            {"role": "system", "content": "You summarize customer feedback in clear bullet points."},
+            {"role": "user", "content": prompt}
             ]
         )
-        summary_text = response.choices[0].message.content.strip()
         await update.message.reply_text(f"📝 Резюме:\n{summary_text}")
 
     except Exception as e:
