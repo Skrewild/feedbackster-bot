@@ -2,9 +2,9 @@ import os
 import logging
 import csv
 from datetime import datetime
-import requests
 
 from dotenv import load_dotenv
+from huggingface_hub import InferenceClient
 from telegram import Update, ForceReply
 from telegram.ext import (
     Application,
@@ -14,22 +14,29 @@ from telegram.ext import (
     filters,
 )
 
+# Load environment variables
 load_dotenv()
 
+# Config
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
-HF_API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.1"
-HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-
+HF_TOKEN = os.getenv("HF_TOKEN")
 LOG_FILE = "feedback_log.csv"
 
+# Logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
+# HuggingFace Inference Client
+client = InferenceClient(
+    provider="fireworks-ai",
+    api_key=HF_TOKEN,
+)
 
+
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     await update.message.reply_html(
@@ -39,6 +46,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+# Help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "ℹ️ Просто напишите сообщение, и я сохраню его как отзыв.\n"
@@ -46,6 +54,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+# Feedback handler
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     feedback = update.message.text
@@ -67,6 +76,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text("✅ Спасибо за ваш отзыв!")
 
 
+# Summary command (admin only)
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("🚫 Эта команда доступна только администратору.")
@@ -82,7 +92,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пока нет отзывов для анализа.")
             return
         feedbacks = [line.strip().split(",")[3] for line in lines if len(line.strip().split(",")) >= 4]
-        combined_feedback = "\n".join(feedbacks[:50])  # limit to 50 for brevity
+        combined_feedback = "\n".join(feedbacks[:50])
 
     prompt = (
         "Summarize the following customer feedback into key themes, complaints, suggestions, "
@@ -90,31 +100,11 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        response = requests.post(
-            HF_API_URL,
-            headers=HEADERS,
-            json={"inputs": prompt}
+        completion = client.chat.completions.create(
+            model="meta-llama/Llama-3.1-8B-Instruct",
+            messages=[{"role": "user", "content": prompt}],
         )
-
-        if response.status_code != 200:
-            logging.error(f"HF API status {response.status_code}: {response.text}")
-            await update.message.reply_text("❌ Ошибка от Hugging Face API: модель не отвечает.")
-            return
-
-        if not response.text.strip():
-            logging.error("Empty response from HF API.")
-            await update.message.reply_text("⚠️ Пустой ответ от Hugging Face API.")
-            return
-
-        result = response.json()
-
-        if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
-            summary_text = result[0]['generated_text'].strip()
-        elif 'error' in result:
-            summary_text = f"Ошибка Hugging Face API: {result['error']}"
-        else:
-            summary_text = "⚠️ Не удалось получить ответ от модели."
-
+        summary_text = completion.choices[0].message.content.strip()
         await update.message.reply_text(f"📝 Резюме:\n{summary_text}")
 
     except Exception as e:
@@ -122,6 +112,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ошибка при обращении к Hugging Face API.")
 
 
+# Main function
 def main() -> None:
     app = Application.builder().token(TOKEN).build()
 
