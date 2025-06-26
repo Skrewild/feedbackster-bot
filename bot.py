@@ -31,7 +31,7 @@ logging.basicConfig(
 # Hugging Face model client
 client = InferenceClient(
     model="HuggingFaceH4/zephyr-7b-beta",
-    token=HF_TOKEN,
+    api_key=HF_TOKEN,
 )
 
 # /start
