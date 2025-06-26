@@ -4,7 +4,6 @@ import csv
 from datetime import datetime
 from dotenv import load_dotenv
 
-import requests
 from huggingface_hub import InferenceClient
 from telegram import Update, ForceReply
 from telegram.ext import (
@@ -29,7 +28,7 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Hugging Face chat-compatible model (recommended)
+# Hugging Face model client
 client = InferenceClient(
     model="HuggingFaceH4/zephyr-7b-beta",
     token=HF_TOKEN,
@@ -95,13 +94,12 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        summary_text = client.chat(
-            messages=[
-            {"role": "system", "content": "You summarize customer feedback in clear bullet points."},
-            {"role": "user", "content": prompt}
-            ]
+        summary_text = client.text_generation(
+            prompt,
+            max_new_tokens=500,
+            temperature=0.7,
         )
-        await update.message.reply_text(f"📝 Резюме:\n{summary_text}")
+        await update.message.reply_text(f"📝 Резюме:\n{summary_text.strip()}")
 
     except Exception as e:
         logging.error(f"Hugging Face API error: {e}")
@@ -117,7 +115,6 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
 
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
