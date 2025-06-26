@@ -1,3 +1,4 @@
 python-telegram-bot==20.3
-huggingface_hub==0.23.3
-python-dotenv==1.0.1
+huggingface_hub>=0.21.4
+python-dotenv
+requests
