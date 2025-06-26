@@ -1,66 +1,51 @@
-from telegram.ext import Application, CommandHandler, ContextTypes
-from telegram import Update
-import os
+import logging
+from telegram import Update, ForceReply
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from datetime import datetime
+import os
+import csv
 
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# CSV File name
+LOG_FILE = "feedback_log.csv"
+
+# Ensure CSV file exists with header
+if not os.path.exists(LOG_FILE):
+    with open(LOG_FILE, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(["User ID", "Username", "Timestamp", "Feedback"])
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Приветствую! Я Фидбекстер, бот для сбора обратной связи. ✉️\n"
-        "Отправьте свои мысли с помощью команды:\n"
-        "/feedback ваш отзыв"
-    )
+    await update.message.reply_text("Привет! Отправьте мне ваше сообщение, и я передам его администратору.")
 
-async def feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    feedback_text = ' '.join(context.args)
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    feedback = update.message.text
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    if not feedback_text:
-        await update.message.reply_text(
-            "Пожалуйста, напишите отзыв после команды. /feedback \n"
-            "Пример: /feedback Бот очень классный!"
-        )
-        return
+    # Save to CSV
+    with open(LOG_FILE, mode='a', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow([user.id, user.username or "None", timestamp, feedback])
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = f"[{timestamp}] {user.full_name} (Телеграм: @{user.username})\n{feedback_text}\n\n"
+    # Notify admin
+    await context.bot.send_message(chat_id=ADMIN_ID, text=f"Новое сообщение от @{user.username or user.id}:\n{feedback}")
 
-    with open("feedback_log.txt", "a", encoding="utf-8") as file:
-        file.write(entry)
+    # Confirm receipt to sender
+    await update.message.reply_text("Спасибо за ваше сообщение!")
 
-    await update.message.reply_text("✅ Спасибо! Ваш отзыв сохранен.")
-
-async def view_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 У тебя нет прав для этой команды.")
-        return
-
-    try:
-        with open("feedback_log.txt", "r", encoding="utf-8") as file:
-            content = file.read()
-
-        if not content.strip():
-            await update.message.reply_text("Файл с отзывами пуст.")
-        else:
-            chunks = [content[i:i+4000] for i in range(0, len(content), 4000)]
-            for chunk in chunks:
-                await update.message.reply_text(f"📄 Отзывы:\n\n{chunk}")
-    except FileNotFoundError:
-        await update.message.reply_text("Файл с отзывами не найден.")
-
-def main():
-    app = Application.builder().token(TOKEN).build()
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("feedback", feedback))
-    app.add_handler(CommandHandler("view_feedback", view_feedback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
 
-    print("Бот запущен")
     app.run_polling()
-
-if __name__ == "__main__":
-    main()
